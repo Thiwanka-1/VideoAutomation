@@ -15,7 +15,10 @@ const sourceDir = path.dirname(fileURLToPath(import.meta.url));
 const allowedPlatforms = ['youtube', 'tiktok', 'facebook'];
 
 function configurationSummary(runtimeConfig) {
-  const configured = (value) => Boolean(value && String(value).toLowerCase() !== 'replace_me');
+  const configured = (value) => Boolean(value && !String(value).toLowerCase().includes('replace_me'));
+  const tiktokRefreshConfigured = configured(runtimeConfig.tiktok.clientKey)
+    && configured(runtimeConfig.tiktok.clientSecret)
+    && configured(runtimeConfig.tiktok.refreshToken);
   return {
     channel: runtimeConfig.channel,
     video: runtimeConfig.video,
@@ -32,7 +35,8 @@ function configurationSummary(runtimeConfig) {
         visibility: runtimeConfig.youtube.privacyStatus,
       },
       tiktok: {
-        configured: configured(runtimeConfig.tiktok.accessToken),
+        configured: configured(runtimeConfig.tiktok.accessToken) || tiktokRefreshConfigured,
+        automaticRefresh: tiktokRefreshConfigured,
         visibility: runtimeConfig.tiktok.privacyLevel,
       },
       facebook: {

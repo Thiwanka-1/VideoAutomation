@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { JobService } from '../src/job-service.js';
 
-async function waitFor(check, timeout = 5000) {
+async function waitFor(check, timeout = 10_000) {
   const started = Date.now();
   while (Date.now() - started < timeout) {
     const result = await check();

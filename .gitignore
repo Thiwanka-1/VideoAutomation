@@ -1,7 +1,10 @@
 api/node_modules/
 api/.env
 api/output/
+api/data/
 client/node_modules/
 client/dist/
 *.log
 .DS_Store
+config.bat
+node_modules
