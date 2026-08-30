@@ -72,6 +72,20 @@ The uploader calls [`videos.insert`](https://developers.google.com/youtube/v3/do
 
 The implementation follows TikTok's required creator query, [`POST /v2/post/publish/video/init/`](https://developers.tiktok.com/docs/en/content-posting-api-reference-direct-post), chunked `PUT` to the returned upload URL, and [`POST /v2/post/publish/status/fetch/`](https://developers.tiktok.com/docs/en/content-posting-api-reference-get-video-status). It also obeys the official [5-64 MB chunk guidance](https://developers.tiktok.com/docs/en/content-posting-api-media-transfer-guide).
 
+### TikTok token rotation
+
+Configure `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TIKTOK_ACCESS_TOKEN`, and
+`TIKTOK_REFRESH_TOKEN` in `api/.env`. The first publish refreshes a seed access
+token whose expiry is unknown. Thereafter, the backend refreshes 15 minutes before
+expiry and also retries once when TikTok returns `access_token_invalid`.
+
+TikTok may rotate the refresh token. The complete returned token bundle is written
+to `api/data/tiktok-tokens.json`, which is ignored by Git and takes precedence over
+the seed values in `.env`. Do not manually copy every rotation back into `.env`.
+Delete the token-store file only when intentionally replacing the account/token
+bundle. For a hosted deployment, replace this local file store with encrypted
+database or secret-manager storage.
+
 ## Facebook Reels
 
 ### Page and monetization settings
@@ -122,4 +136,3 @@ Meta versions expire. Keep `FACEBOOK_GRAPH_VERSION` configurable and test the ne
 5. Only enable unattended posting after the APIs are audited and at least 30 reviewed runs have behaved correctly.
 
 No application can promise earnings. Platform acceptance, country availability, originality review, audience response, taxes, and payout setup all remain external requirements.
-

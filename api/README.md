@@ -128,4 +128,5 @@ Most importantly, automation is not a monetization guarantee. A static-image, te
 - Hugging Face models/providers can change availability. Both model and provider are environment settings.
 - OAuth access and Page tokens expire or can be revoked. Never commit `.env`.
 - TikTok processing is asynchronous. The returned `publish_id` can be checked through `fetchTikTokPublishStatus()`.
+- TikTok access tokens are proactively refreshed and retried once on `access_token_invalid`; rotated bundles are stored in the Git-ignored `data/tiktok-tokens.json` file.
 - One 60-second asset fits the documented Facebook Page Reel maximum and TikTok Creator Rewards minimum, but platform rules can change. Recheck them before going public.

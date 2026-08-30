@@ -4,6 +4,7 @@ import path from 'node:path';
 import { google } from 'googleapis';
 import { assertConfigured } from './config.js';
 import { probeDuration } from './media.js';
+import { TikTokTokenManager, withTikTokAuthRetry } from './tiktok-token-manager.js';
 import { readJson, truncate, withHashtags, writeJson } from './utils.js';
 
 const TIKTOK_API = 'https://open.tiktokapis.com';
@@ -22,11 +23,48 @@ async function parseApiResponse(response, label) {
   return data;
 }
 
-function assertTikTokOk(payload, label) {
-  if (payload?.error?.code && payload.error.code !== 'ok') {
-    throw new Error(`${label} failed: ${payload.error.code} - ${payload.error.message || 'unknown error'}`);
+class TikTokApiError extends Error {
+  constructor({ label, status, code, message }) {
+    super(`${label} failed (${status}): ${code} - ${message}`);
+    this.name = 'TikTokApiError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
+async function parseTikTokResponse(response, label) {
+  const text = await response.text();
+  let payload;
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = { raw: text };
+  }
+  const code = payload?.error?.code || (response.ok ? 'ok' : 'unknown_error');
+  if (!response.ok || code !== 'ok') {
+    throw new TikTokApiError({
+      label,
+      status: response.status,
+      code,
+      message: payload?.error?.message || truncate(text, 1000) || 'unknown error',
+    });
   }
   return payload;
+}
+
+async function authenticatedTikTokRequest({ manager, fetchImpl, url, label, body }) {
+  return withTikTokAuthRetry(manager, async (accessToken) => {
+    const response = await fetchImpl(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json; charset=UTF-8',
+      },
+      body,
+      signal: AbortSignal.timeout(30_000),
+    });
+    return parseTikTokResponse(response, label);
+  });
 }
 
 export async function uploadYouTube({ videoPath, content, config }) {
@@ -93,35 +131,30 @@ export function buildTikTokChunkPlan(fileSize) {
   return { chunkSize, totalChunkCount, chunks };
 }
 
-async function queryTikTokCreator(config, fetchImpl) {
-  const response = await fetchImpl(`${TIKTOK_API}/v2/post/publish/creator_info/query/`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.tiktok.accessToken}`,
-      'Content-Type': 'application/json; charset=UTF-8',
-    },
+async function queryTikTokCreator(manager, fetchImpl) {
+  return authenticatedTikTokRequest({
+    manager,
+    fetchImpl,
+    url: `${TIKTOK_API}/v2/post/publish/creator_info/query/`,
+    label: 'TikTok creator query',
     body: '{}',
-    signal: AbortSignal.timeout(30_000),
   });
-  return assertTikTokOk(await parseApiResponse(response, 'TikTok creator query'), 'TikTok creator query');
 }
 
 export async function fetchTikTokPublishStatus({ publishId, config, fetchImpl = fetch }) {
-  const response = await fetchImpl(`${TIKTOK_API}/v2/post/publish/status/fetch/`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.tiktok.accessToken}`,
-      'Content-Type': 'application/json; charset=UTF-8',
-    },
+  const manager = new TikTokTokenManager({ config, fetchImpl });
+  return authenticatedTikTokRequest({
+    manager,
+    fetchImpl,
+    url: `${TIKTOK_API}/v2/post/publish/status/fetch/`,
+    label: 'TikTok status query',
     body: JSON.stringify({ publish_id: publishId }),
-    signal: AbortSignal.timeout(30_000),
   });
-  return assertTikTokOk(await parseApiResponse(response, 'TikTok status query'), 'TikTok status query');
 }
 
 export async function uploadTikTok({ videoPath, content, config, fetchImpl = fetch }) {
-  assertConfigured('TikTok', { TIKTOK_ACCESS_TOKEN: config.tiktok.accessToken });
-  const creator = await queryTikTokCreator(config, fetchImpl);
+  const manager = new TikTokTokenManager({ config, fetchImpl });
+  const creator = await queryTikTokCreator(manager, fetchImpl);
   const allowedPrivacy = creator?.data?.privacy_level_options || [];
   if (allowedPrivacy.length && !allowedPrivacy.includes(config.tiktok.privacyLevel)) {
     throw new Error(`TikTok privacy ${config.tiktok.privacyLevel} is unavailable. Allowed: ${allowedPrivacy.join(', ')}`);
@@ -140,12 +173,11 @@ export async function uploadTikTok({ videoPath, content, config, fetchImpl = fet
     2200,
   );
 
-  const initialize = await fetchImpl(`${TIKTOK_API}/v2/post/publish/video/init/`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.tiktok.accessToken}`,
-      'Content-Type': 'application/json; charset=UTF-8',
-    },
+  const initialized = await authenticatedTikTokRequest({
+    manager,
+    fetchImpl,
+    url: `${TIKTOK_API}/v2/post/publish/video/init/`,
+    label: 'TikTok upload initialization',
     body: JSON.stringify({
       post_info: {
         title: caption,
@@ -165,12 +197,7 @@ export async function uploadTikTok({ videoPath, content, config, fetchImpl = fet
         total_chunk_count: plan.totalChunkCount,
       },
     }),
-    signal: AbortSignal.timeout(30_000),
   });
-  const initialized = assertTikTokOk(
-    await parseApiResponse(initialize, 'TikTok upload initialization'),
-    'TikTok upload initialization',
-  );
   const { upload_url: uploadUrl, publish_id: publishId } = initialized.data || {};
   if (!uploadUrl || !publishId) throw new Error('TikTok did not return upload_url and publish_id.');
 
